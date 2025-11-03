@@ -31,10 +31,11 @@ class ShapleyExplainer:
                 The dataset used as a background reference for computing Shapley values.
                 Shape should be (n_background, n_features).
         """
-        # TODO: Store `model` and `background_dataset` on `self`.
-        raise NotImplementedError("Initialize and store model and background dataset.")
+        # Store the model and background dataset
+        self.model = model
+        self.background_dataset = background_dataset
 
-    def shapley_values(self, X: np.ndarray) -> np.ndarray:
+    def shap_values(self, X: np.ndarray) -> np.ndarray:
         """Compute Shapley values for each instance and feature.
 
         Args:
@@ -45,13 +46,15 @@ class ShapleyExplainer:
             np.ndarray:
                 A 2D array of Shapley values with the same shape as `X`.
         """
-        # TODO:
-        # 1) Create an array of shape equal to `X` to hold Shapley values.
-        # 2) For each instance i and each feature j:
-        #       - Compute single shapley value for feature j and instance i of X.
-        #       - Store the result in the output array at [i, j].
-        # 3) Return the filled Shapley array.
-        raise NotImplementedError("Compute per-instance, per-feature Shapley values.")
+        n_instances, n_features = X.shape
+        shapley_vals = np.zeros((n_instances, n_features))
+
+        # Iterate over all instances and features
+        for i in range(n_instances):
+            for j in range(n_features):
+                shapley_vals[i, j] = self._compute_single_shapley_value(j, X[i, :])
+
+        return shapley_vals
 
     def _compute_single_shapley_value(self, feature: int, instance: np.ndarray) -> float:
         """Compute the Shapley value for a single feature in one instance.
@@ -69,22 +72,23 @@ class ShapleyExplainer:
             float:
                 The Shapley value for the given feature.
         """
-        # TODO:
-        # 1) Determine the total number of features from `instance`.
-        # 2) Initialize an accumulator for the Shapley value.
-        # 3) Iterate over all subsets of "other" features (i.e., excluding `feature`):
-        #       - Let S be such a subset (a tuple of indices).
-        #       - Compute model expectation with S only: E[f(X) | X_S = instance_S]
-        #         (use `_subset_model_approximation(S, instance)`).
-        #       - Compute model expectation with S ∪ {feature}:
-        #         `_subset_model_approximation(S_plus_feature, instance)`.
-        #       - Compute the permutation weight using `_permutation_factor(n_features, len(S))`.
-        #       - Add weight * (with_feature - without_feature) to the accumulator.
-        # 4) Return the accumulated value.
-        # Hints:
-        # - To form S ∪ {feature}, concatenate the tuple with `(feature,)`.
-        # - Keep computations in float to avoid integer division issues.
-        raise NotImplementedError("Implement Shapley summation over all coalitions excluding the feature.")
+        n_features = len(instance)
+        shapley_value = 0.0
+
+        # Iterate over all subsets S that do not include the feature of interest
+        for subset in self._get_all_other_feature_subsets(n_features, feature):
+            # Compute the model output with and without the feature
+            w_f = self._subset_model_approximation(subset + (feature,), instance)
+            wo_f = self._subset_model_approximation(subset, instance)
+
+            # Compute the marginal contribution
+            marginal_contribution = w_f - wo_f
+            # Compute the permutation factor
+            weight = self._permutation_factor(n_features, len(subset))
+
+            # Accumulate the weighted marginal contribution
+            shapley_value += weight * marginal_contribution
+        return shapley_value
 
     def _get_all_subsets(self, items: list[int]) -> Iterable[tuple[int, ...]]:
         """Generate all subsets of a list.
@@ -97,12 +101,8 @@ class ShapleyExplainer:
             Iterable[tuple[int, ...]]:
                 Iterator over all possible subsets (including empty and full).
         """
-        # TODO:
-        # 1) Return an iterator over all k-combinations for k = 0..len(items).
-        # Hints:
-        # - Use `itertools.combinations(items, r)` inside a generator expression.
-        # - You can flatten with `itertools.chain.from_iterable(...)`.
-        raise NotImplementedError("Return an iterator over all subsets of the given items.")
+        # Obtain an iterator over all subsets
+        return chain.from_iterable(combinations(items, r) for r in range(len(items) + 1))
 
     def _get_all_other_feature_subsets(self, n_features: int, feature_of_interest: int) -> Iterable[tuple[int, ...]]:
         """Generate all subsets of features excluding the feature of interest.
@@ -117,12 +117,11 @@ class ShapleyExplainer:
             Iterable[tuple[int, ...]]:
                 Iterator of feature index subsets not containing the feature of interest.
         """
-        # TODO:
-        # 1) Build a list of all feature indices except `feature_of_interest`.
-        # 2) Return all subsets of that list by calling `_get_all_subsets(...)`.
-        # Hints:
-        # - A list comprehension over range(n_features) works well for step (1).
-        raise NotImplementedError("Generate subsets of all features except the feature of interest.")
+        # Create a list of all feature indices and exclude the feature of interest
+        indices = [i for i in range(n_features) if i != feature_of_interest]
+
+        return self._get_all_subsets(indices)
+
 
     def _permutation_factor(self, n_features: int, n_subset: int) -> float:
         """Compute the permutation weighting factor for a subset.
@@ -141,12 +140,8 @@ class ShapleyExplainer:
                 Permutation weight for the subset:
                 |S|! * (M - |S| - 1)! / M!  where M = n_features.
         """
-        # TODO:
-        # 1) Translate the formula into code using factorials.
-        # 2) Return the resulting float.
-        # Hints:
-        # - Use `math.factorial` imported above.
-        raise NotImplementedError("Compute Shapley permutation weight for a subset size.")
+        # |S| = n_subset, |M| = n_features
+        return factorial(n_subset) * factorial(n_features - n_subset - 1) / factorial(n_features)
 
     def _subset_model_approximation(self, feature_subset: tuple[int, ...], instance: np.ndarray) -> float:
         """Approximate the model output conditioned on a subset of features.
@@ -167,14 +162,15 @@ class ShapleyExplainer:
             float:
                 The mean model output given the subset of features.
         """
-        # TODO:
-        # 1) Make a copy of the background dataset (avoid mutating the original).
-        # 2) For each feature index j in 0..(n_features-1):
-        #       - If j is in `feature_subset`, replace the j-th column of the copy
-        #         with the scalar value `instance[j]` (broadcast to all rows).
-        # 3) Call the model on the modified background to get predictions.
-        # 4) Return the mean of those predictions as a scalar float.
-        # Hints:
-        # - Column assignment can broadcast a scalar to all rows in NumPy.
-        # - Some models return shape (n,) and others (n, 1); take the mean robustly.
-        raise NotImplementedError("Approximate conditional expectation via background overwriting.")
+        # Create a copy of the background dataset to avoid modifying the original
+        backg_c = self.background_dataset.copy()
+
+        # Overwrite the columns in feature_subset with values from instance
+        for feature in feature_subset:
+            backg_c[:, feature] = instance[feature]
+
+        # Predict on the modified background dataset
+        predictions = self.model(backg_c)
+
+        # Obtain conditional expectation
+        return np.mean(predictions)
